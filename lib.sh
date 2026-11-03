@@ -46,19 +46,59 @@ acpi_wakeup_devices() {
     done
 }
 
-# Recent kernel log lines matching the known instant-resume signature.
-journal_evidence() {
+# A sleep shorter than this counts as an instant wake. Normal resume work
+# stretches a true instant wake to several seconds, so this can't be 1-2s.
+INSTANT_WAKE_MAX_SECS="${INSTANT_WAKE_MAX_SECS:-10}"
+
+# Kernel log lines from the last 7 days, across boots. Don't use `journalctl
+# -k` here: it implies --boot=0, so --since would silently stop at the last
+# reboot. Extra arguments are passed through to journalctl.
+kernel_journal() {
     command -v journalctl >/dev/null 2>&1 || return 0
-    journalctl -k --since "-7 days" -g "xHC error in resume|USBSTS 0x401" --no-pager -q 2>/dev/null | tail -n 5
+    journalctl _TRANSPORT=kernel --since "-7 days" --no-pager -q "$@" 2>/dev/null
 }
 
-# PCI addresses of xHCI controllers actually named in a resume-error log
-# line -- this is hardware evidence, not a name-pattern guess. ACPI wakeup
+# Recent kernel log lines matching the xHCI resume-error signature.
+journal_evidence() {
+    kernel_journal -g "xHC error in resume|USBSTS 0x401" | tail -n 5
+}
+
+# Prints "TOTAL INSTANT": completed sleep cycles in the journal, and how many
+# of them lasted under INSTANT_WAKE_MAX_SECS.
+sleep_cycle_counts() {
+    kernel_journal -o short-unix -g "PM: suspend (entry|exit)" |
+        awk -v max="$INSTANT_WAKE_MAX_SECS" '
+            /PM: suspend entry/ { start = $1; next }
+            /PM: suspend exit/  {
+                if (start) { total++; if ($1 - start < max) instant++ }
+                start = 0
+            }
+            END { print total + 0, instant + 0 }'
+}
+
+# PCI addresses of xHCI controllers that logged a resume error during an
+# instant wake -- hardware evidence, not a name-pattern guess. ACPI wakeup
 # source naming for the xHCI controller varies by vendor (XHC0, XHCI, PTXH,
 # ...), so matching the address seen failing is far more reliable than
 # matching a name prefix.
+#
+# The error alone proves nothing: some controllers log it on every resume,
+# including after hours of normal sleep. So only errors logged during a cycle
+# that lasted under INSTANT_WAKE_MAX_SECS count.
 xhci_journal_culprits() {
-    journal_evidence | grep -oE '[0-9a-fA-F]{4}:[0-9a-fA-F]{2}:[0-9a-fA-F]{2}\.[0-9a-fA-F]' | sort -u
+    kernel_journal -o short-unix -g "PM: suspend (entry|exit)|xHC error in resume|USBSTS 0x401" |
+        awk -v max="$INSTANT_WAKE_MAX_SECS" '
+            BEGIN {
+                h = "[0-9a-fA-F]"
+                addr = h h h h ":" h h ":" h h "\\." h
+            }
+            /PM: suspend entry/ { start = $1; errors = ""; next }
+            /PM: suspend exit/  {
+                if (start && $1 - start < max) printf "%s", errors
+                start = 0; errors = ""; next
+            }
+            match($0, addr) { errors = errors substr($0, RSTART, RLENGTH) "\n" }' |
+        sort -u
 }
 
 sanitize_name() {
