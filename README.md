@@ -24,6 +24,9 @@ Two components cause this far more often than anything else:
   That's the USB controller failing its resume handshake and reinitializing.
   Confirmed as a real, actively-discussed kernel regression:
   [bugzilla.kernel.org #216470](https://bugzilla.kernel.org/show_bug.cgi?id=216470).
+  The error alone doesn't prove an instant wake, because some controllers log
+  it on every resume, even after hours of normal sleep. This tool only treats
+  it as evidence when it was logged during a sleep that lasted under 10 seconds.
 
 Both produce the same symptom: suspend, then near-instant resume, every time.
 It shows up across laptops with NVMe SSDs, AMD Ryzen desktops (B550/X670E
@@ -40,7 +43,8 @@ varies per machine, so there's no one command to paste. This tool:
 
 1. **Diagnoses first.** `diagnose.sh` finds your NVMe's parent PCI root port,
    lists every PCI device with wakeup enabled, parses `/proc/acpi/wakeup`,
-   and checks the journal for the xHC resume error — read-only, no root.
+   and checks the last 7 days of the journal, across reboots, for xHC resume
+   errors during instant wakes — read-only, no root.
 2. **Only touches devices matching the known pattern** (the NVMe's own root
    port, or an ACPI source named `XHC*`/`GPP*`) unless you explicitly pass
    `--pci`/`--xhc` for something else. It won't blindly disable every

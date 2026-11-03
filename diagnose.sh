@@ -57,6 +57,11 @@ else
 fi
 echo
 
+echo "-- Sleep cycles, last 7 days --"
+read -r cycles_total cycles_instant <<< "$(sleep_cycle_counts)"
+echo "  $cycles_total completed, $cycles_instant lasted under ${INSTANT_WAKE_MAX_SECS}s"
+echo
+
 echo "-- Journal-confirmed xHCI controller(s) --"
 journal_culprits=$(xhci_journal_culprits)
 found_jc=0
@@ -65,9 +70,12 @@ while read -r addr; do
     found_jc=1
     st=$(cat "/sys/bus/pci/devices/$addr/power/wakeup" 2>/dev/null || echo "unknown")
     desc=$(pci_class_desc "$addr")
-    echo "  $addr  wakeup=$st  ($desc)  -- this exact address appeared in a resume-error log line"
+    echo "  $addr  wakeup=$st  ($desc)  -- logged a resume error during a sleep under ${INSTANT_WAKE_MAX_SECS}s"
 done <<< "$journal_culprits"
-[ "$found_jc" = 1 ] || echo "  (none -- no resume-error log lines found to cross-reference)"
+if [ "$found_jc" = 0 ]; then
+    echo "  (none -- no resume error was logged during a sleep under ${INSTANT_WAKE_MAX_SECS}s)"
+    [ -z "$ev" ] || echo "  Resume errors on normal-length sleeps don't indicate an instant wake."
+fi
 echo
 
 echo "=== Verdict ==="
@@ -77,7 +85,8 @@ if [ -n "$journal_culprits" ]; then
         [ -n "$addr" ] || continue
         st=$(cat "/sys/bus/pci/devices/$addr/power/wakeup" 2>/dev/null || echo "")
         if [ "$st" = "enabled" ]; then
-            echo "  Likely culprit (confirmed by journal): $addr has wakeup=enabled and appeared in a resume error."
+            echo "  Likely culprit (confirmed by journal): $addr has wakeup=enabled and logged a resume error during an instant wake."
+            echo "    A sleep this short can also be you waking the machine yourself -- check that it matches what you saw."
             echo "    Fix with: sudo ./install.sh --pci $addr"
             verdict_found=1
         fi

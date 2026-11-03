@@ -24,10 +24,11 @@ Usage: sudo $0 [options]
   --dry-run       Show what would be done; make no changes. No root required.
   -h, --help      Show this help.
 
-With no --pci/--xhc given, auto-selects only journal-confirmed xHCI
-controllers and NVMe root ports currently showing wakeup=enabled, and asks
-before touching them. Run ./diagnose.sh first for the full picture, including
-weaker name-pattern matches (XHC*/GPP*) that need --pci/--xhc explicitly.
+With no --pci/--xhc given, auto-selects only xHCI controllers that logged a
+resume error during an instant wake and NVMe root ports, when currently showing
+wakeup=enabled, and asks before touching them. Run ./diagnose.sh first for the
+full picture, including weaker name-pattern matches (XHC*/GPP*) that need
+--pci/--xhc explicitly.
 EOF
 }
 
